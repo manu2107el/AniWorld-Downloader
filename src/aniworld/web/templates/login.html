@@ -37,6 +37,13 @@
                 <p>Please log in to continue</p>
             </div>
 
+            {% if oidc_enabled %}
+            <a href="{{ url_for('auth.oidc_login') }}" class="auth-btn oidc-btn">
+                <i class="fas fa-id-card"></i> Login with OIDC
+            </a>
+            <div class="divider">OR</div>
+            {% endif %}
+
             <form id="loginForm" class="auth-form">
                 <div class="form-group">
                     <label for="username">Username</label>

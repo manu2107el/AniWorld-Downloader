@@ -6,6 +6,7 @@ import hashlib
 import os
 import secrets
 import sqlite3
+import json
 from typing import Optional, Dict, List
 from pathlib import Path
 
@@ -46,10 +47,12 @@ class UserDatabase:
                 CREATE TABLE IF NOT EXISTS users (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     username TEXT UNIQUE NOT NULL,
-                    password_hash TEXT NOT NULL,
-                    salt TEXT NOT NULL,
+                    password_hash TEXT, -- Nullable for OIDC users
+                    salt TEXT,          -- Nullable for OIDC users
                     is_admin BOOLEAN NOT NULL DEFAULT 0,
                     is_original_admin BOOLEAN NOT NULL DEFAULT 0,
+                    oidc_id TEXT UNIQUE, -- Unique identifier from OIDC provider
+                    oidc_groups TEXT,    -- JSON string of groups from OIDC provider
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     last_login TIMESTAMP
                 )
@@ -66,8 +69,6 @@ class UserDatabase:
                     FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
                 )
             """)
-
-            # Note: download_queue table removed - download status now handled in memory
 
             conn.commit()
 
@@ -87,47 +88,65 @@ class UserDatabase:
     def create_user(
         self,
         username: str,
-        password: str,
+        password: Optional[str] = None,
         is_admin: bool = False,
         is_original_admin: bool = False,
-    ) -> bool:
+        oidc_id: Optional[str] = None,
+        oidc_groups: Optional[List[str]] = None,
+    ) -> Optional[Dict]:
         """
         Create a new user.
 
         Args:
             username: Username
-            password: Plain text password
+            password: Plain text password (optional, for local users)
             is_admin: Whether user should have admin privileges
             is_original_admin: Whether this is the original admin user
+            oidc_id: Unique identifier from OIDC provider (optional, for OIDC users)
+            oidc_groups: List of groups from OIDC provider (optional, for OIDC users)
 
         Returns:
-            True if user was created successfully, False otherwise
+            User dictionary if user was created successfully, None otherwise
         """
         try:
-            salt = secrets.token_hex(16)
-            password_hash = self._hash_password(password, salt)
+            salt = None
+            password_hash = None
+            if password:
+                salt = secrets.token_hex(16)
+                password_hash = self._hash_password(password, salt)
+
+            oidc_groups_json = json.dumps(oidc_groups) if oidc_groups else None
 
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute(
                     """
-                    INSERT INTO users (username, password_hash, salt, is_admin, is_original_admin)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO users (username, password_hash, salt, is_admin, is_original_admin, oidc_id, oidc_groups)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                    (username, password_hash, salt, is_admin, is_original_admin),
+                    (username, password_hash, salt, is_admin, is_original_admin, oidc_id, oidc_groups_json),
                 )
                 conn.commit()
-                return True
+                user_id = cursor.lastrowid
+                return {
+                    "id": user_id,
+                    "username": username,
+                    "is_admin": is_admin,
+                    "is_original_admin": is_original_admin,
+                    "oidc_id": oidc_id,
+                    "oidc_groups": oidc_groups,
+                }
 
         except sqlite3.IntegrityError:
-            # Username already exists
-            return False
-        except Exception:
-            return False
+            # Username or oidc_id already exists
+            return None
+        except Exception as e:
+            logging.error(f"Error creating user: {e}")
+            return None
 
     def verify_user(self, username: str, password: str) -> Optional[Dict]:
         """
-        Verify user credentials.
+        Verify user credentials for local users.
 
         Args:
             username: Username
@@ -141,9 +160,9 @@ class UserDatabase:
                 cursor = conn.cursor()
                 cursor.execute(
                     """
-                    SELECT id, username, password_hash, salt, is_admin, is_original_admin
-                    FROM users WHERE username = ?
-                """,
+                    SELECT id, username, password_hash, salt, is_admin, is_original_admin, oidc_id, oidc_groups
+                    FROM users WHERE username = ? AND oidc_id IS NULL
+                """, # Only verify local users
                     (username,),
                 )
 
@@ -151,7 +170,7 @@ class UserDatabase:
                 if not row:
                     return None
 
-                user_id, username, stored_hash, salt, is_admin, is_original_admin = row
+                user_id, username, stored_hash, salt, is_admin, is_original_admin, oidc_id, oidc_groups_json = row
 
                 # Verify password
                 if self._hash_password(password, salt) == stored_hash:
@@ -170,11 +189,14 @@ class UserDatabase:
                         "username": username,
                         "is_admin": bool(is_admin),
                         "is_original_admin": bool(is_original_admin),
+                        "oidc_id": oidc_id,
+                        "oidc_groups": json.loads(oidc_groups_json) if oidc_groups_json else [],
                     }
 
                 return None
 
-        except Exception:
+        except Exception as e:
+            logging.error(f"Error verifying user: {e}")
             return None
 
     def create_session(self, user_id: int) -> str:
@@ -225,7 +247,7 @@ class UserDatabase:
                 cursor = conn.cursor()
                 cursor.execute(
                     """
-                    SELECT u.id, u.username, u.is_admin, u.is_original_admin
+                    SELECT u.id, u.username, u.is_admin, u.is_original_admin, u.oidc_id, u.oidc_groups
                     FROM users u
                     JOIN sessions s ON u.id = s.user_id
                     WHERE s.session_token = ? AND s.expires_at > CURRENT_TIMESTAMP
@@ -240,11 +262,49 @@ class UserDatabase:
                         "username": row[1],
                         "is_admin": bool(row[2]),
                         "is_original_admin": bool(row[3]),
+                        "oidc_id": row[4],
+                        "oidc_groups": json.loads(row[5]) if row[5] else [],
                     }
 
                 return None
 
-        except Exception:
+        except Exception as e:
+            logging.error(f"Error getting user by session: {e}")
+            return None
+
+    def get_user_by_oidc_id(self, oidc_id: str) -> Optional[Dict]:
+        """
+        Get user information by OIDC ID.
+
+        Args:
+            oidc_id: Unique identifier from OIDC provider
+
+        Returns:
+            User dictionary if user exists, None otherwise
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT id, username, is_admin, is_original_admin, oidc_id, oidc_groups
+                    FROM users WHERE oidc_id = ?
+                """,
+                    (oidc_id,),
+                )
+                row = cursor.fetchone()
+                if row:
+                    return {
+                        "id": row[0],
+                        "username": row[1],
+                        "is_admin": bool(row[2]),
+                        "is_original_admin": bool(row[3]),
+                        "oidc_id": row[4],
+                        "oidc_groups": json.loads(row[5]) if row[5] else [],
+                    }
+                return None
+        except Exception as e:
+            logging.error(f"Error getting user by OIDC ID: {e}")
             return None
 
     def delete_session(self, session_token: str) -> bool:
@@ -269,7 +329,8 @@ class UserDatabase:
                 conn.commit()
                 return cursor.rowcount > 0
 
-        except Exception:
+        except Exception as e:
+            logging.error(f"Error deleting session: {e}")
             return False
 
     def get_all_users(self) -> List[Dict]:
@@ -283,7 +344,7 @@ class UserDatabase:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    SELECT id, username, is_admin, is_original_admin, created_at, last_login
+                    SELECT id, username, is_admin, is_original_admin, oidc_id, oidc_groups, created_at, last_login
                     FROM users ORDER BY username
                 """)
 
@@ -295,14 +356,17 @@ class UserDatabase:
                             "username": row[1],
                             "is_admin": bool(row[2]),
                             "is_original_admin": bool(row[3]),
-                            "created_at": row[4],
-                            "last_login": row[5],
+                            "oidc_id": row[4],
+                            "oidc_groups": json.loads(row[5]) if row[5] else [],
+                            "created_at": row[6],
+                            "last_login": row[7],
                         }
                     )
 
                 return users
 
-        except Exception:
+        except Exception as e:
+            logging.error(f"Error getting all users: {e}")
             return []
 
     def delete_user(self, user_id: int) -> bool:
@@ -322,7 +386,8 @@ class UserDatabase:
                 conn.commit()
                 return cursor.rowcount > 0
 
-        except Exception:
+        except Exception as e:
+            logging.error(f"Error deleting user: {e}")
             return False
 
     def update_user(
@@ -331,6 +396,7 @@ class UserDatabase:
         username: str = None,
         password: str = None,
         is_admin: bool = None,
+        oidc_groups: Optional[List[str]] = None,
     ) -> bool:
         """
         Update user information.
@@ -340,6 +406,7 @@ class UserDatabase:
             username: New username (optional)
             password: New password (optional)
             is_admin: New admin status (optional)
+            oidc_groups: New OIDC groups (optional, for OIDC users)
 
         Returns:
             True if user was updated, False otherwise
@@ -366,6 +433,10 @@ class UserDatabase:
                     updates.append("is_admin = ?")
                     params.append(is_admin)
 
+                if oidc_groups is not None:
+                    updates.append("oidc_groups = ?")
+                    params.append(json.dumps(oidc_groups))
+
                 if not updates:
                     return True  # Nothing to update
 
@@ -385,7 +456,8 @@ class UserDatabase:
         except sqlite3.IntegrityError:
             # Username already exists
             return False
-        except Exception:
+        except Exception as e:
+            logging.error(f"Error updating user: {e}")
             return False
 
     def has_users(self) -> bool:
@@ -402,14 +474,32 @@ class UserDatabase:
                 count = cursor.fetchone()[0]
                 return count > 0
 
-        except Exception:
+        except Exception as e:
+            logging.error(f"Error checking for users: {e}")
+            return False
+
+    def has_local_users(self) -> bool:
+        """
+        Check if any local users (not OIDC) exist in the database.
+
+        Returns:
+            True if at least one local user exists, False otherwise
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM users WHERE oidc_id IS NULL")
+                count = cursor.fetchone()[0]
+                return count > 0
+        except Exception as e:
+            logging.error(f"Error checking for local users: {e}")
             return False
 
     def change_password(
         self, user_id: int, current_password: str, new_password: str
     ) -> bool:
         """
-        Change a user's password.
+        Change a local user's password.
 
         Args:
             user_id: User ID
@@ -423,17 +513,17 @@ class UserDatabase:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
 
-                # Get current password hash and salt
+                # Get current password hash and salt for local user
                 cursor.execute(
                     """
-                    SELECT password_hash, salt FROM users WHERE id = ?
+                    SELECT password_hash, salt FROM users WHERE id = ? AND oidc_id IS NULL
                 """,
                     (user_id,),
                 )
 
                 row = cursor.fetchone()
                 if not row:
-                    return False
+                    return False # User not found or is an OIDC user
 
                 stored_hash, salt = row
 
@@ -457,7 +547,8 @@ class UserDatabase:
                 conn.commit()
                 return cursor.rowcount > 0
 
-        except Exception:
+        except Exception as e:
+            logging.error(f"Error changing password: {e}")
             return False
 
     def cleanup_expired_sessions(self) -> None:
@@ -470,8 +561,5 @@ class UserDatabase:
                 """)
                 conn.commit()
 
-        except Exception:
-            pass
-
-    # Download Queue Management Methods - Removed
-    # Download status is now handled in memory by DownloadQueueManager
+        except Exception as e:
+            logging.error(f"Error cleaning up expired sessions: {e}")

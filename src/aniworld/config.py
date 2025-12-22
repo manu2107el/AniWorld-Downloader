@@ -315,6 +315,15 @@ SYNCPLAY_PATH = get_syncplay_path()
 YTDLP_PATH = shutil.which("yt-dlp")  # already in pip deps
 
 #########################################################################################
+# OIDC Configuration
+#########################################################################################
+OIDC_ENABLED = os.getenv("OIDC_ENABLED", "False").lower() == "true"
+OIDC_CLIENT_ID = os.getenv("OIDC_CLIENT_ID", "YOUR_OIDC_CLIENT_ID")
+OIDC_CLIENT_SECRET = os.getenv("OIDC_CLIENT_SECRET", "YOUR_OIDC_CLIENT_SECRET")
+OIDC_DISCOVERY_URL = os.getenv("OIDC_DISCOVERY_URL", "https://YOUR_OIDC_PROVIDER/.well-known/openid-configuration")
+OIDC_ADMIN_GROUP = os.getenv("OIDC_ADMIN_GROUP", "admin") 
+OIDC_USERNAME_CLAIM = os.getenv("OIDC_USERNAME_CLAIM", "preferred_username") 
+OIDC_GROUPS_CLAIM = os.getenv("OIDC_GROUPS_CLAIM", "groups") 
 
 if __name__ == "__main__":
     pass

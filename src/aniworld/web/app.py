@@ -8,6 +8,7 @@ import time
 import threading
 import webbrowser
 from flask import Flask, Blueprint, render_template, jsonify, request, session, redirect, url_for
+from authlib.integrations.flask_client import OAuth
 
 # Import modules from the parent package
 from .. import config
@@ -69,6 +70,28 @@ class WebApp:
         app.config["ARGUMENTS"] = self.arguments # Pass arguments for download path etc.
         app.config["CONFIG"] = config # Pass the entire config module
         app.config["START_TIME"] = self.start_time
+
+        # OIDC Configuration
+        app.config["OIDC_ENABLED"] = config.OIDC_ENABLED
+        if config.OIDC_ENABLED:
+           
+            app.config["OIDC_CLIENT_ID"] = config.OIDC_CLIENT_ID
+            app.config["OIDC_CLIENT_SECRET"] = config.OIDC_CLIENT_SECRET
+            app.config["OIDC_DISCOVERY_URL"] = config.OIDC_DISCOVERY_URL
+            app.config["OIDC_ADMIN_GROUP"] = config.OIDC_ADMIN_GROUP
+            app.config["OIDC_USERNAME_CLAIM"] = config.OIDC_USERNAME_CLAIM
+            app.config["OIDC_GROUPS_CLAIM"] = config.OIDC_GROUPS_CLAIM
+
+            # Initialize Authlib OAuth client
+            oauth = OAuth(app)
+            oauth.register(
+                name='aniworld_oidc',
+                client_id=app.config["OIDC_CLIENT_ID"],
+                client_secret=app.config["OIDC_CLIENT_SECRET"],
+                server_metadata_url=app.config["OIDC_DISCOVERY_URL"],
+                client_kwargs={'scope': 'openid email profile groups'}, # Request standard claims + groups
+            )
+            app.config["OAUTH"] = oauth # Store oauth object in app config
 
         # Register blueprints
         app.register_blueprint(auth_bp)
@@ -154,6 +177,9 @@ def start_web_interface(arguments=None, port=5000, debug=False):
     print("=" * 69)
     print(f"📍 Server Address:   {server_address}")
     print(f"🔐 Security Mode:    {auth_status}")
+    if config.OIDC_ENABLED:
+        print(f"🔑 OIDC Enabled:     YES (Provider: {config.OIDC_DISCOVERY_URL.split('/.well-known')[0]})")
+        print(f"👥 Admin Group:      '{config.OIDC_ADMIN_GROUP}'")
     print(f"🌐 External Access:  {expose_status}")
     print(f"📁 Download Path:    {download_path}")
     print(f"🐞 Debug Mode:       {'ENABLED' if debug else 'DISABLED'}")
@@ -161,8 +187,11 @@ def start_web_interface(arguments=None, port=5000, debug=False):
     print(f"🌏 Browser:          {browser_status}")
     print("=" * 69)
     print("💡 Access the web interface by opening the URL above in your browser")
-    if getattr(arguments, "enable_web_auth", False):
+    if getattr(arguments, "enable_web_auth", False) and not config.OIDC_ENABLED:
         print("💡 First visit will prompt you to create an admin account")
+    elif config.OIDC_ENABLED:
+        print("💡 Use the 'Login with OIDC' button to authenticate.")
+        print(f"💡 Users in the OIDC group '{config.OIDC_ADMIN_GROUP}' will be granted admin privileges.")
     print("💡 Press Ctrl+C to stop the server")
     print("=" * 69 + "\n")
 
@@ -181,5 +210,3 @@ def start_web_interface(arguments=None, port=5000, debug=False):
         browser_thread = threading.Thread(target=open_browser)
         browser_thread.daemon = True
         browser_thread.start()
-
-    web_app.run()

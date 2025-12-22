@@ -1,5 +1,6 @@
 import logging
 from flask import Blueprint, render_template, jsonify, request, session, redirect, url_for, current_app
+from authlib.integrations.flask_client import OAuthError
 from ..utils import require_api_auth, require_admin, require_auth 
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/')
@@ -8,12 +9,17 @@ auth_bp = Blueprint('auth', __name__, url_prefix='/')
 def login():
     """Login page route."""
     auth_enabled = current_app.config.get("AUTH_ENABLED", False)
+    oidc_enabled = current_app.config.get("OIDC_ENABLED", False)
     db = current_app.config.get("DB")
 
     if not auth_enabled or not db:
         return redirect(url_for("main.index"))
 
-    if not db.has_users():
+    if oidc_enabled:
+        # If OIDC is enabled, redirect to OIDC login
+        return redirect(url_for("auth.oidc_login"))
+
+    if not db.has_local_users(): # Check for local users specifically
         return redirect(url_for("auth.setup"))
 
     if request.method == "POST":
@@ -34,7 +40,7 @@ def login():
                 "session_token",
                 session_token,
                 httponly=True,
-                secure=False,
+                secure=False, # Set to True in production with HTTPS
                 max_age=30 * 24 * 60 * 60,
             )
             return response
@@ -43,12 +49,13 @@ def login():
                 {"success": False, "error": "Invalid credentials"}
             ), 401
 
-    return render_template("login.html")
+    return render_template("login.html", oidc_enabled=oidc_enabled)
 
 @auth_bp.route("/logout", methods=["POST"])
 def logout():
     """Logout route."""
     auth_enabled = current_app.config.get("AUTH_ENABLED", False)
+    oidc_enabled = current_app.config.get("OIDC_ENABLED", False)
     db = current_app.config.get("DB")
 
     if not auth_enabled or not db:
@@ -60,18 +67,31 @@ def logout():
 
     response = jsonify({"success": True, "redirect": url_for("auth.login")})
     response.set_cookie("session_token", "", expires=0)
+
+    if oidc_enabled:
+        # If OIDC is enabled, also redirect to OIDC provider's logout endpoint if available
+        # This assumes the OIDC provider has a logout endpoint and Authlib handles it.
+        # For simplicity, we'll just redirect to local login after clearing session.
+        # A full OIDC logout would involve redirecting to the OIDC provider's end_session_endpoint.
+        pass # For now, just clear local session and redirect to login
+
     return response
 
 @auth_bp.route("/setup", methods=["GET", "POST"])
 def setup():
     """First-time setup route for creating admin user."""
     auth_enabled = current_app.config.get("AUTH_ENABLED", False)
+    oidc_enabled = current_app.config.get("OIDC_ENABLED", False)
     db = current_app.config.get("DB")
 
     if not auth_enabled or not db:
         return redirect(url_for("main.index"))
 
-    if db.has_users():
+    if oidc_enabled:
+        # If OIDC is enabled, local setup is not allowed
+        return redirect(url_for("auth.login"))
+
+    if db.has_local_users(): # Check for local users specifically
         return redirect(url_for("main.index"))
 
     if request.method == "POST":
@@ -115,6 +135,7 @@ def settings():
     """Settings page route."""
     auth_enabled = current_app.config.get("AUTH_ENABLED", False)
     db = current_app.config.get("DB")
+    oidc_enabled = current_app.config.get("OIDC_ENABLED", False)
 
     if not auth_enabled or not db:
         return redirect(url_for("main.index"))
@@ -123,7 +144,7 @@ def settings():
     user = db.get_user_by_session(session_token)
     users = db.get_all_users() if user and user["is_admin"] else []
 
-    return render_template("settings.html", user=user, users=users)
+    return render_template("settings.html", user=user, users=users, oidc_enabled=oidc_enabled)
 
 @auth_bp.route("/api/users", methods=["GET"])
 @require_admin
@@ -140,7 +161,7 @@ def api_get_users():
 @auth_bp.route("/api/users", methods=["POST"])
 @require_admin
 def api_create_user():
-    """Create new user (admin only)."""
+    """Create new local user (admin only)."""
     db = current_app.config.get("DB")
     data = request.get_json()
 
@@ -174,7 +195,9 @@ def api_create_user():
             {"success": False, "error": "Authentication not available"}
         ), 500
 
-    if db.create_user(username, password, is_admin):
+    # Ensure we are creating a local user, not an OIDC user
+    new_user = db.create_user(username, password, is_admin, oidc_id=None, oidc_groups=None)
+    if new_user:
         return jsonify(
             {"success": True, "message": "User created successfully"}
         )
@@ -196,13 +219,13 @@ def api_delete_user(user_id):
             {"success": False, "error": "Authentication not available"}
         ), 500
 
-    # Get user info to check if it's the original admin
+    # Get user info to check if it's the original admin or an OIDC user
     users = db.get_all_users()
     user_to_delete = next((u for u in users if u["id"] == user_id), None)
 
-    if user_to_delete and user_to_delete.get("is_original_admin"):
+    if user_to_delete and (user_to_delete.get("is_original_admin") or user_to_delete.get("oidc_id")):
         return jsonify(
-            {"success": False, "error": "Cannot delete the original admin user"}
+            {"success": False, "error": "Cannot delete original admin or OIDC-managed users"}
         ), 400
 
     if db.delete_user(user_id):
@@ -220,6 +243,21 @@ def api_update_user(user_id):
     """Update user (admin only)."""
     db = current_app.config.get("DB")
     data = request.get_json()
+
+    # Get user info to check if it's an OIDC user
+    user_to_update = db.get_user_by_session(request.cookies.get("session_token")) # Get current user
+    if user_to_update and user_to_update["id"] == user_id: # If updating self
+        pass # Allow updating own password/username
+    else: # If updating another user
+        target_user = db.get_user_by_session(request.cookies.get("session_token")) # This is wrong, need to get target user by ID
+        all_users = db.get_all_users()
+        target_user = next((u for u in all_users if u["id"] == user_id), None)
+
+        if target_user and target_user.get("oidc_id"):
+            return jsonify(
+                {"success": False, "error": "Cannot update OIDC-managed user details (username/password/admin status). Groups are managed by OIDC provider."}
+            ), 400
+
     username = (
         data.get("username", "").strip() if data.get("username") else None
     )
@@ -265,6 +303,9 @@ def api_change_password():
     if not user:
         return jsonify({"success": False, "error": "Invalid session"}), 401
 
+    if user.get("oidc_id"):
+        return jsonify({"success": False, "error": "OIDC users cannot change password locally."}), 400
+
     data = request.get_json()
     current_password = data.get("current_password", "")
     new_password = data.get("new_password", "")
@@ -293,3 +334,85 @@ def api_change_password():
         return jsonify(
             {"success": False, "error": "Failed to change password. Current password may be incorrect.",}
         ), 400
+
+# OIDC Routes
+@auth_bp.route("/oidc-login")
+def oidc_login():
+    """Initiate OIDC login flow."""
+    if not current_app.config.get("OIDC_ENABLED"):
+        return redirect(url_for("auth.login"))
+
+    oauth = current_app.config["OAUTH"]
+    redirect_uri = url_for('auth.oidc_callback', _external=True)
+    return oauth.aniworld_oidc.authorize_redirect(redirect_uri)
+
+@auth_bp.route("/oidc-callback")
+def oidc_callback():
+    """Handle OIDC callback and process user information."""
+    if not current_app.config.get("OIDC_ENABLED"):
+        return redirect(url_for("auth.login"))
+
+    oauth = current_app.config["OAUTH"]
+    db = current_app.config["DB"]
+    oidc_admin_group = current_app.config["OIDC_ADMIN_GROUP"]
+    oidc_username_claim = current_app.config["OIDC_USERNAME_CLAIM"]
+    oidc_groups_claim = current_app.config["OIDC_GROUPS_CLAIM"]
+
+    try:
+        token = oauth.aniworld_oidc.authorize_access_token()
+        userinfo = oauth.aniworld_oidc.parse_id_token(token)
+
+        oidc_id = userinfo.get('sub')
+        username = userinfo.get(oidc_username_claim, oidc_id) # Fallback to sub if username claim not found
+        oidc_groups = userinfo.get(oidc_groups_claim, [])
+
+        if not isinstance(oidc_groups, list): # Handle cases where groups might be a string or other format
+            if isinstance(oidc_groups, str):
+                oidc_groups = [g.strip() for g in oidc_groups.split(',')]
+            else:
+                oidc_groups = []
+
+        is_admin = oidc_admin_group in oidc_groups
+
+        user = db.get_user_by_oidc_id(oidc_id)
+
+        if user:
+            # User exists, update groups and admin status if changed
+            if user["oidc_groups"] != oidc_groups or user["is_admin"] != is_admin:
+                db.update_user(user["id"], is_admin=is_admin, oidc_groups=oidc_groups)
+                logging.info(f"Updated OIDC user {username} (ID: {user['id']}) with new groups/admin status.")
+            user_id = user["id"]
+        else:
+            # New user, create account
+            new_user = db.create_user(
+                username=username,
+                password=None, # No local password for OIDC users
+                is_admin=is_admin,
+                is_original_admin=False, # OIDC users are not original admins
+                oidc_id=oidc_id,
+                oidc_groups=oidc_groups,
+            )
+            if not new_user:
+                logging.error(f"Failed to create OIDC user {username} with ID {oidc_id}")
+                return jsonify({"success": False, "error": "Failed to create user account"}), 500
+            user_id = new_user["id"]
+            logging.info(f"Created new OIDC user {username} (ID: {user_id}) with groups: {oidc_groups}")
+
+        # Create local session for the user
+        session_token = db.create_session(user_id)
+        response = redirect(url_for("main.index"))
+        response.set_cookie(
+            "session_token",
+            session_token,
+            httponly=True,
+            secure=False, # Set to True in production with HTTPS
+            max_age=30 * 24 * 60 * 60,
+        )
+        return response
+
+    except OAuthError as e:
+        logging.error(f"OIDC OAuthError: {e}")
+        return jsonify({"success": False, "error": f"OIDC login failed: {e.error}"}), 400
+    except Exception as e:
+        logging.error(f"OIDC callback error: {e}")
+        return jsonify({"success": False, "error": "OIDC login failed due to an unexpected error"}), 500

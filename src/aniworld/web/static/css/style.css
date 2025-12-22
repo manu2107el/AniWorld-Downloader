@@ -91,6 +91,7 @@
     align-items: center;
     justify-content: center;
     gap: 0.5rem;
+    text-decoration: none; /* For OIDC button which is an <a> */
 }
 
 .auth-btn:hover {
@@ -101,6 +102,39 @@
 .auth-btn:active {
     transform: translateY(0);
 }
+
+.oidc-btn {
+    background: linear-gradient(135deg, #4299e1 0%, #3182ce 100%); /* A distinct color for OIDC */
+    margin-bottom: 1rem;
+}
+
+.oidc-btn:hover {
+    box-shadow: 0 8px 25px rgba(66, 153, 225, 0.3);
+}
+
+.divider {
+    display: flex;
+    align-items: center;
+    text-align: center;
+    color: var(--text-tertiary);
+    margin: 1.5rem 0;
+}
+
+.divider::before,
+.divider::after {
+    content: '';
+    flex: 1;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.divider:not(:empty)::before {
+    margin-right: .5em;
+}
+
+.divider:not(:empty)::after {
+    margin-left: .5em;
+}
+
 
 .error-message {
     background: #fee;
@@ -459,6 +493,12 @@
     border: 1px solid #ed8936;
 }
 
+.role-badge.oidc-user {
+    background: #e0f2fe;
+    color: #2b6cb0;
+    border: 1px solid #63b3ed;
+}
+
 body[data-theme="dark"] .role-badge.admin {
     background: #234e52;
     color: #81e6d9;
@@ -473,6 +513,12 @@ body[data-theme="dark"] .role-badge.original-admin {
     background: #744210;
     color: #f6e05e;
     border: 1px solid #d69e2e;
+}
+
+body[data-theme="dark"] .role-badge.oidc-user {
+    background: #1a365d;
+    color: #90cdf4;
+    border: 1px solid #4299e1;
 }
 
 .text-muted {
@@ -1458,6 +1504,7 @@ body[data-theme="dark"] .results-section {
     overflow: hidden;
     position: relative;
     transition: background 0.3s ease;
+    border: 1px solid var(--border-color);
 }
 
 .progress-fill {

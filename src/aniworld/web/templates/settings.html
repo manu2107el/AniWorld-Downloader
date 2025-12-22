@@ -66,7 +66,13 @@
                 <h2><i class="fas fa-user"></i> User Information</h2>
                 <div class="user-info">
                     <p><strong>Username:</strong> {{ user.username }}</p>
-                    <p><strong>Role:</strong> {{ 'Original Administrator' if user.is_original_admin else ('Administrator' if user.is_admin else 'User') }}</p>
+                    <p><strong>Role:</strong>
+                        <span class="role-badge {{ 'original-admin' if user.is_original_admin else ('admin' if user.is_admin else ('oidc-user' if user.oidc_id else 'user')) }}">
+                            {{ 'Original Admin' if user.is_original_admin else ('Admin' if user.is_admin else ('OIDC User' if user.oidc_id else 'User')) }}
+                        </span>
+                    </p>
+                    {% if user.oidc_id %}<p><strong>OIDC ID:</strong> {{ user.oidc_id }}</p>{% endif %}
+                    {% if user.oidc_groups %}<p><strong>OIDC Groups:</strong> {{ user.oidc_groups | join(', ') }}</p>{% endif %}
                 </div>
             </div>
 
@@ -74,6 +80,9 @@
             <div class="settings-section">
                 <h2><i class="fas fa-key"></i> Change Password</h2>
 
+                {% if user.oidc_id %}
+                <p class="text-muted">OIDC users cannot change their password locally. Your password is managed by your OIDC provider.</p>
+                {% else %}
                 <form id="changePasswordForm" class="password-form">
                     <div class="form-row-password">
                         <div class="form-group">
@@ -95,6 +104,7 @@
                         </div>
                     </div>
                 </form>
+                {% endif %}
             </div>
 
             <!-- Admin User Management Section -->
@@ -103,8 +113,9 @@
                 <h2><i class="fas fa-users"></i> User Management</h2>
 
                 <!-- Add User Form -->
+                {% if not oidc_enabled %}
                 <div class="add-user-form">
-                    <h3>Add New User</h3>
+                    <h3>Add New Local User</h3>
                     <form id="addUserForm">
                         <div class="form-row">
                             <div class="form-group">
@@ -128,6 +139,9 @@
                         </div>
                     </form>
                 </div>
+                {% else %}
+                <p class="text-muted">Local user creation is disabled when OIDC is enabled. New users are provisioned via OIDC login.</p>
+                {% endif %}
 
                 <!-- Users List -->
                 <div class="users-list">
@@ -138,6 +152,8 @@
                                 <tr>
                                     <th>Username</th>
                                     <th>Role</th>
+                                    <th>OIDC ID</th>
+                                    <th>OIDC Groups</th>
                                     <th>Created</th>
                                     <th>Last Login</th>
                                     <th>Actions</th>
@@ -148,19 +164,23 @@
                                 <tr data-user-id="{{ u.id }}">
                                     <td>{{ u.username }}</td>
                                     <td>
-                                        <span class="role-badge {{ 'original-admin' if u.is_original_admin else ('admin' if u.is_admin else 'user') }}">
-                                            {{ 'Original Admin' if u.is_original_admin else ('Admin' if u.is_admin else 'User') }}
+                                        <span class="role-badge {{ 'original-admin' if u.is_original_admin else ('admin' if u.is_admin else ('oidc-user' if u.oidc_id else 'user')) }}">
+                                            {{ 'Original Admin' if u.is_original_admin else ('Admin' if u.is_admin else ('OIDC User' if u.oidc_id else 'User')) }}
                                         </span>
                                     </td>
+                                    <td>{{ u.oidc_id if u.oidc_id else 'N/A' }}</td>
+                                    <td>{{ u.oidc_groups | join(', ') if u.oidc_groups else 'N/A' }}</td>
                                     <td>{{ u.created_at[:19] if u.created_at else 'N/A' }}</td>
                                     <td>{{ u.last_login[:19] if u.last_login else 'Never' }}</td>
                                     <td>
-                                        {% if u.id != user.id and not u.is_original_admin %}
+                                        {% if u.id != user.id and not u.is_original_admin and not u.oidc_id %}
                                         <button class="btn btn-sm btn-danger delete-user" data-user-id="{{ u.id }}" data-username="{{ u.username }}">
                                             <i class="fas fa-trash"></i>
                                         </button>
                                         {% elif u.is_original_admin %}
                                         <span class="text-muted">(Protected)</span>
+                                        {% elif u.oidc_id %}
+                                        <span class="text-muted">(OIDC Managed)</span>
                                         {% else %}
                                         <span class="text-muted">(Current User)</span>
                                         {% endif %}
@@ -369,18 +389,20 @@
                     <tr data-user-id="${u.id}">
                         <td>${u.username}</td>
                         <td>
-                            <span class="role-badge ${u.is_original_admin ? 'original-admin' : (u.is_admin ? 'admin' : 'user')}">
-                                ${u.is_original_admin ? 'Original Admin' : (u.is_admin ? 'Admin' : 'User')}
+                            <span class="role-badge ${u.is_original_admin ? 'original-admin' : (u.is_admin ? 'admin' : (u.oidc_id ? 'oidc-user' : 'user'))}">
+                                ${u.is_original_admin ? 'Original Admin' : (u.is_admin ? 'Admin' : (u.oidc_id ? 'OIDC User' : 'User'))}
                             </span>
                         </td>
+                        <td>${u.oidc_id ? u.oidc_id : 'N/A'}</td>
+                        <td>${u.oidc_groups && u.oidc_groups.length > 0 ? u.oidc_groups.join(', ') : 'N/A'}</td>
                         <td>${u.created_at ? u.created_at.substring(0, 19) : 'N/A'}</td>
                         <td>${u.last_login ? u.last_login.substring(0, 19) : 'Never'}</td>
                         <td>
-                            ${u.id !== currentUserId && !u.is_original_admin ?
+                            ${u.id !== currentUserId && !u.is_original_admin && !u.oidc_id ?
                                 `<button class="btn btn-sm btn-danger delete-user" data-user-id="${u.id}" data-username="${u.username}">
                                     <i class="fas fa-trash"></i>
                                 </button>` :
-                                (u.is_original_admin ? '<span class="text-muted">(Protected)</span>' : '<span class="text-muted">(Current User)</span>')
+                                (u.is_original_admin ? '<span class="text-muted">(Protected)</span>' : (u.oidc_id ? '<span class="text-muted">(OIDC Managed)</span>' : '<span class="text-muted">(Current User)</span>'))
                             }
                         </td>
                     </tr>
