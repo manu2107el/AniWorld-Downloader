@@ -65,11 +65,10 @@
         </div>
     </div>
 
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function() {
-            // Theme handling
-            const savedTheme = localStorage.getItem('theme') || 'dark';
-            document.body.setAttribute('data-theme', savedTheme);
+            window.initializeTheme();
 
             // Setup form handling
             const setupForm = document.getElementById('setupForm');

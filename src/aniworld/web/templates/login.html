@@ -57,12 +57,10 @@
         </div>
     </div>
 
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
     <script>
-        // Add the same theme functionality as main page
         document.addEventListener('DOMContentLoaded', function() {
-            // Theme handling
-            const savedTheme = localStorage.getItem('theme') || 'dark';
-            document.body.setAttribute('data-theme', savedTheme);
+            window.initializeTheme();
 
             // Login form handling
             const loginForm = document.getElementById('loginForm');

@@ -179,14 +179,12 @@
     <!-- Success/Error Messages -->
     <div id="message-container" class="message-container"></div>
 
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function() {
-            // Theme handling
-            const savedTheme = localStorage.getItem('theme') || 'dark';
-            document.body.setAttribute('data-theme', savedTheme);
-
-            // Load version info
-            loadVersionInfo();
+            // Initialize theme and load version info using global functions
+            window.initializeTheme();
+            window.loadVersionInfo();
 
             // User dropdown functionality
             const userDropdownBtn = document.getElementById('user-dropdown-btn');
@@ -213,38 +211,13 @@
 
             // Theme toggle in dropdown
             if (themeToggleDropdown && themeIconDropdown) {
-                updateDropdownThemeIcon(savedTheme);
+                // Initialize dropdown theme icon using global function
+                window.updateDropdownThemeIcon(document.body.getAttribute('data-theme') || 'dark');
 
                 themeToggleDropdown.addEventListener('click', function() {
-                    const currentTheme = document.body.getAttribute('data-theme');
-                    const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
-
-                    document.body.setAttribute('data-theme', newTheme);
-                    localStorage.setItem('theme', newTheme);
-                    updateDropdownThemeIcon(newTheme);
+                    window.toggleTheme(); // Use global toggleTheme
+                    // The setTheme function (called by toggleTheme) will now also update the dropdown icon
                 });
-
-                function updateDropdownThemeIcon(theme) {
-                    if (theme === 'dark') {
-                        themeIconDropdown.className = 'fas fa-sun';
-                    } else {
-                        themeIconDropdown.className = 'fas fa-moon';
-                    }
-                }
-            }
-
-            async function loadVersionInfo() {
-                try {
-                    const response = await fetch('/api/info');
-                    const data = await response.json();
-
-                    const versionDisplay = document.getElementById('version-display');
-                    if (versionDisplay && data.version) {
-                        versionDisplay.textContent = `v${data.version}`;
-                    }
-                } catch (error) {
-                    console.error('Failed to load version info:', error);
-                }
             }
 
             // Change password form
@@ -412,7 +385,7 @@
                         </td>
                     </tr>
                 `).join('');
-            },
+            }
 
             function showMessage(message, type) {
                 const container = document.getElementById('message-container');

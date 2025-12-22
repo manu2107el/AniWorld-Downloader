@@ -1,4 +1,66 @@
-// AniWorld Downloader Web Interface JavaScript
+function initializeTheme() {
+    const savedTheme = localStorage.getItem('theme') || 'dark';
+    setTheme(savedTheme);
+}
+
+function toggleTheme() {
+    const currentTheme = document.body.getAttribute('data-theme') || 'light';
+    const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+    setTheme(newTheme);
+}
+
+function setTheme(theme) {
+    if (theme === 'light') {
+        document.body.removeAttribute('data-theme');
+        const themeIcon = document.getElementById('theme-icon');
+        if (themeIcon) {
+            themeIcon.className = 'fas fa-moon';
+        }
+    } else {
+        document.body.setAttribute('data-theme', 'dark');
+        const themeIcon = document.getElementById('theme-icon');
+        if (themeIcon) {
+            themeIcon.className = 'fas fa-sun';
+        }
+    }
+    localStorage.setItem('theme', theme);
+    updateDropdownThemeIcon(theme);
+}
+
+function updateDropdownThemeIcon(theme) {
+    const themeIconDropdown = document.getElementById('theme-icon-dropdown');
+    if (themeIconDropdown) {
+        if (theme === 'dark') {
+            themeIconDropdown.className = 'fas fa-sun';
+        } else {
+            themeIconDropdown.className = 'fas fa-moon';
+        }
+    }
+}
+
+function loadVersionInfo() {
+    fetch('/api/info')
+        .then(response => response.json())
+        .then(data => {
+            const versionDisplay = document.getElementById('version-display');
+            if (versionDisplay && data.version) {
+                versionDisplay.textContent = `v${data.version}`;
+            }
+        })
+        .catch(error => {
+            console.error('Failed to load version info:', error);
+            const versionDisplay = document.getElementById('version-display');
+            if (versionDisplay) {
+                versionDisplay.textContent = 'v?.?.?';
+            }
+        });
+}
+
+window.initializeTheme = initializeTheme;
+window.setTheme = setTheme;
+window.toggleTheme = toggleTheme;
+window.updateDropdownThemeIcon = updateDropdownThemeIcon;
+window.loadVersionInfo = loadVersionInfo;
 
 document.addEventListener('DOMContentLoaded', function() {
     console.log('AniWorld Downloader Web Interface loaded');
@@ -51,7 +113,7 @@ document.addEventListener('DOMContentLoaded', function() {
     let availableProviders = [];
 
     // Load version info and providers on page load
-    loadVersionInfo();
+    window.loadVersionInfo();
 
     // Check for active downloads on page load
     checkQueueStatus();
@@ -61,7 +123,7 @@ document.addEventListener('DOMContentLoaded', function() {
     loadPopularAndNewAnime();
 
     // Initialize theme (default is dark mode)
-    initializeTheme();
+    window.initializeTheme();
 
     // Search functionality
     if (searchBtn) {
@@ -94,7 +156,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Theme toggle functionality (only if element exists)
     if (themeToggle) {
-        themeToggle.addEventListener('click', toggleTheme);
+        themeToggle.addEventListener('click', window.toggleTheme);
     }
 
     // Navbar title click functionality
@@ -120,17 +182,6 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    function loadVersionInfo() {
-        fetch('/api/info')
-            .then(response => response.json())
-            .then(data => {
-                versionDisplay.textContent = `v${data.version}`;
-            })
-            .catch(error => {
-                console.error('Failed to load version info:', error);
-                versionDisplay.textContent = 'v?.?.?';
-            });
-    }
 
     function loadAvailableProviders() {
         // This will be called from showDownloadModal with site-specific logic
@@ -1003,7 +1054,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const card = document.createElement('div');
         card.className = 'home-anime-card';
 
-        const defaultCover = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjMwMCIgdmlld0JveD0iMCAwIDIwMCAzMDAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSIyMDAiIGhlaWdodD0iMzAwIiBmaWxsPSIjMzMzIi8+CjxwYXRoIGQ9Ik0xMDAgMTUwTDEyMCAxNzBMMTAwIDE5MFY3MGwyMCAyMEwxMDAgMTEwVjE1MFoiIGZpbGw9IiM2NjYiLz4KPC9zdmc+';
+        const defaultCover = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjMwMCIgdmlld0JveD0iMCAwIDIwMCAzMDAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSIyMDAiIGhlaWdodD0iMzAwIiBmaWxsPSIjMzMzIi8+CjxwYXRoIGQ9Ik0xMDAgMTUwTDEyMCAxNzBMMTAwIDE5MFY3MGwy ২০AyMEwxMDAgMTEwVjE1MFoiIGZpbGw9IiM2NjYiLz4KPC9zdmc+';
 
         // Replace image size from 150x225 to 220x330 for higher resolution
         let coverUrl = anime.cover || defaultCover;
@@ -1042,40 +1093,6 @@ document.addEventListener('DOMContentLoaded', function() {
         return card;
     }
 
-
-    // Theme functions
-    function initializeTheme() {
-        // Check if user has a saved theme preference, default to dark mode
-        const savedTheme = localStorage.getItem('theme') || 'dark';
-        setTheme(savedTheme);
-    }
-
-    function toggleTheme() {
-        console.log('Toggle theme clicked'); // Debug log
-        const currentTheme = document.body.getAttribute('data-theme') || 'light';
-        console.log('Current theme:', currentTheme); // Debug log
-        const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
-        console.log('New theme:', newTheme); // Debug log
-        setTheme(newTheme);
-    }
-
-    function setTheme(theme) {
-        console.log('Setting theme to:', theme); // Debug log
-        if (theme === 'light') {
-            document.body.removeAttribute('data-theme');
-            if (themeIcon) {
-                themeIcon.className = 'fas fa-moon';
-            }
-            console.log('Switched to light mode'); // Debug log
-        } else {
-            document.body.setAttribute('data-theme', 'dark');
-            if (themeIcon) {
-                themeIcon.className = 'fas fa-sun';
-            }
-            console.log('Switched to dark mode'); // Debug log
-        }
-        localStorage.setItem('theme', theme);
-    }
 
     // Make showDownloadModal globally accessible
     window.showDownloadModal = showDownloadModal;
