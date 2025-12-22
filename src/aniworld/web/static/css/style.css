@@ -2392,8 +2392,10 @@ body[data-theme="dark"] .episode-progress-text {
         height: 150px;
     }
 
-    .anime-section h3 {
-        font-size: 1.3rem;
+    .home-anime-title {
+        font-size: 0.7rem;
+        height: 2.5rem;
+        padding: 0.4rem 0.3rem;
     }
 }
 

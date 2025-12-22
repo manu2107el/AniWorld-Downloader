@@ -586,8 +586,8 @@ document.addEventListener('DOMContentLoaded', function() {
         const isChecked = moviesCheckbox.checked;
 
         availableMovies.forEach(movie => {
-            const movieId = `movie-${movie.movie}`;
-            const movieCheckbox = document.getElementById(`movie-${movieId}`);
+            const movieKey = `movie-${movie.movie}`;
+            const movieCheckbox = document.getElementById(`movie-${movieKey}`);
 
             if (movieCheckbox) {
                 movieCheckbox.checked = isChecked;
@@ -1227,15 +1227,6 @@ style.textContent = `
         }
         to {
             opacity: 1;
-        }
-    }
-
-    @keyframes fadeOut {
-        from {
-            opacity: 1;
-        }
-        to {
-            opacity: 0;
         }
     }
 

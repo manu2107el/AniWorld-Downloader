@@ -37,7 +37,7 @@
                 <span class="version" id="version-display">Loading...</span>
             </div>
             <div class="nav-actions">
-                <a href="{{ url_for('index') }}" class="nav-btn" title="Back to Main">
+                <a href="{{ url_for('main.index') }}" class="nav-btn" title="Back to Main">
                     <i class="fas fa-home"></i>
                 </a>
                 <div class="user-dropdown">
@@ -412,7 +412,7 @@
                         </td>
                     </tr>
                 `).join('');
-            }
+            },
 
             function showMessage(message, type) {
                 const container = document.getElementById('message-container');
